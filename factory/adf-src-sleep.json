@@ -1,0 +1,15 @@
+{
+	"name": "adf-src-sleep",
+	"properties": {
+		"trustModeClaimForMi": {
+			"value": "Disabled",
+			"editable": true
+		}
+	},
+	"location": "eastus",
+	"identity": {
+		"type": "SystemAssigned",
+		"principalId": "5afbb23c-1296-4ad9-946a-015d55efd540",
+		"tenantId": "ce34067c-dea5-4b97-8a9e-7e46ceb92260"
+	}
+}
