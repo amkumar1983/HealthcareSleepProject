@@ -1,0 +1,77 @@
+# Databricks Asset Bundle (DAB) — defines deployable artifacts (wheel, notebooks, jobs)
+# and per-target (dev/test/prod) deployment settings. Deploy with:
+#   databricks bundle deploy -t dev
+#   databricks bundle deploy -t prod
+# (invoked by pipelines/devops/azure-pipelines.yml in CI/CD, not run manually for test/prod)
+
+bundle:
+  name: sleepapnea-data-platform
+
+variables:
+  env:
+    description: Target environment name
+  job_cluster_node_type:
+    description: VM SKU for the job cluster
+  job_cluster_min_workers:
+    description: Autoscale min workers
+  job_cluster_max_workers:
+    description: Autoscale max workers
+  schedule_pause_status:
+    description: UNPAUSED to enable the schedule, PAUSED to disable (e.g. for dev)
+    default: PAUSED
+
+include:
+  - infra/databricks/jobs/*.yml
+
+artifacts:
+  sleepapnea_dp_wheel:
+    type: whl
+    build: python setup.py bdist_wheel
+    path: .
+
+workspace:
+  root_path: /Shared/.bundle/${bundle.target}/${bundle.name}
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://adb-XXXXXXXXXXXXXXX-dev.azuredatabricks.net
+    variables:
+      env: dev
+      job_cluster_node_type: Standard_DS3_v2
+      job_cluster_min_workers: 1
+      job_cluster_max_workers: 2
+      schedule_pause_status: PAUSED
+
+  test:
+    mode: production
+    workspace:
+      host: https://adb-XXXXXXXXXXXXXXX-test.azuredatabricks.net
+    variables:
+      env: test
+      job_cluster_node_type: Standard_DS3_v2
+      job_cluster_min_workers: 2
+      job_cluster_max_workers: 4
+      schedule_pause_status: UNPAUSED
+    run_as:
+      service_principal_name: "sp-sleepapnea-test"
+
+  prod:
+    mode: production
+    workspace:
+      host: https://adb-XXXXXXXXXXXXXXX-prod.azuredatabricks.net
+    variables:
+      env: prod
+      job_cluster_node_type: Standard_DS4_v2
+      job_cluster_min_workers: 2
+      job_cluster_max_workers: 8
+      schedule_pause_status: UNPAUSED
+    run_as:
+      service_principal_name: "sp-sleepapnea-prod"
+    permissions:
+      - group_name: data-engineering-prod-admins
+        level: CAN_MANAGE
+      - group_name: data-engineering-prod-readers
+        level: CAN_VIEW

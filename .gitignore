@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.databricks/
+.vscode/
+.idea/
+sample_data/example_output/
+sample_data/output/
+*.whl
+.env
+.DS_Store

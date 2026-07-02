@@ -1,0 +1,19 @@
+# PROD environment overrides
+environment: prod
+
+storage:
+  account_name: stsleepapneaprod
+
+unity_catalog:
+  catalog_name: sleepapnea_prod
+
+databricks:
+  workspace_url: https://adb-XXXXXXXXXXXXXXX-prod.azuredatabricks.net
+  job_cluster_policy_id: "REPLACE_ME_prod"
+
+autoloader:
+  trigger: continuous
+
+monitoring:
+  log_analytics_workspace_id: "REPLACE_ME_prod"
+  alert_email: data-eng-prod@yourorg.com

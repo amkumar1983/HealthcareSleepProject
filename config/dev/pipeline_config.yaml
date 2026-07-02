@@ -1,0 +1,19 @@
+# DEV environment overrides
+environment: dev
+
+storage:
+  account_name: stsleepapneadev
+
+unity_catalog:
+  catalog_name: sleepapnea_dev
+
+databricks:
+  workspace_url: https://adb-XXXXXXXXXXXXXXX-dev.azuredatabricks.net
+  job_cluster_policy_id: "REPLACE_ME_dev"
+
+autoloader:
+  trigger: availableNow
+
+monitoring:
+  log_analytics_workspace_id: "REPLACE_ME_dev"
+  alert_email: data-eng-dev@yourorg.com

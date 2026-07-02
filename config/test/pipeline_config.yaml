@@ -1,0 +1,19 @@
+# TEST environment overrides
+environment: test
+
+storage:
+  account_name: stsleepapneatest
+
+unity_catalog:
+  catalog_name: sleepapnea_test
+
+databricks:
+  workspace_url: https://adb-XXXXXXXXXXXXXXX-test.azuredatabricks.net
+  job_cluster_policy_id: "REPLACE_ME_test"
+
+autoloader:
+  trigger: availableNow
+
+monitoring:
+  log_analytics_workspace_id: "REPLACE_ME_test"
+  alert_email: data-eng-test@yourorg.com

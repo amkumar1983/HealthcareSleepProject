@@ -1,0 +1,90 @@
+# Defines the Databricks Workflow (Job) DAG: Setup -> Bronze -> Quality Gate -> Silver -> Gold.
+# Included by the root databricks.yml bundle. Cluster sizing is parameterized per target via
+# bundle variables so dev runs cheap/small and prod runs on a properly sized job cluster.
+
+resources:
+  jobs:
+    sleep_apnea_medallion_pipeline:
+      name: "sleep-apnea-medallion-pipeline-${var.env}"
+      tags:
+        env: ${var.env}
+        data_classification: PHI
+
+      job_clusters:
+        - job_cluster_key: main_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "${var.job_cluster_node_type}"
+            autoscale:
+              min_workers: ${var.job_cluster_min_workers}
+              max_workers: ${var.job_cluster_max_workers}
+            data_security_mode: SINGLE_USER       # Unity Catalog cluster
+            spark_conf:
+              spark.databricks.delta.preview.enabled: "true"
+            custom_tags:
+              project: sleep-apnea-data-platform
+
+      tasks:
+        - task_key: setup
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../../notebooks/00_setup/00_bootstrap_config.py
+            base_parameters:
+              env: "${var.env}"
+          libraries:
+            - whl: ../../dist/*.whl
+
+        - task_key: bronze_ingest
+          depends_on:
+            - task_key: setup
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../../notebooks/10_bronze/10_ingest_device_sessions.py
+            base_parameters:
+              env: "${var.env}"
+          libraries:
+            - whl: ../../dist/*.whl
+
+        - task_key: quality_gate
+          depends_on:
+            - task_key: bronze_ingest
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../../notebooks/40_quality/40_quality_gate.py
+            base_parameters:
+              env: "${var.env}"
+          libraries:
+            - whl: ../../dist/*.whl
+
+        - task_key: silver_transform
+          depends_on:
+            - task_key: quality_gate
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../../notebooks/20_silver/20_transform_silver.py
+            base_parameters:
+              env: "${var.env}"
+          libraries:
+            - whl: ../../dist/*.whl
+
+        - task_key: gold_build
+          depends_on:
+            - task_key: silver_transform
+          job_cluster_key: main_cluster
+          notebook_task:
+            notebook_path: ../../notebooks/30_gold/30_build_gold_marts.py
+            base_parameters:
+              env: "${var.env}"
+          libraries:
+            - whl: ../../dist/*.whl
+
+      schedule:
+        quartz_cron_expression: "0 0 5 * * ?"  # 05:00 UTC daily; tighten/loosen per env if needed
+        timezone_id: "UTC"
+        pause_status: ${var.schedule_pause_status}
+
+      email_notifications:
+        on_failure:
+          - data-eng-${var.env}@yourorg.com
+
+      max_concurrent_runs: 1

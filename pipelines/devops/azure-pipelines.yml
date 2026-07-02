@@ -1,0 +1,163 @@
+# Azure DevOps multi-stage pipeline: lint+test -> build wheel -> deploy dev (auto) ->
+# deploy test (manual approval via environment) -> deploy prod (manual approval via environment).
+#
+# Prerequisites:
+#  - Azure DevOps Environments named "test" and "prod" with approval gates configured.
+#  - Service connections / service principals per workspace with Databricks bundle deploy perms.
+#  - Variable groups (linked to Key Vault) per env: sleepapnea-dev-vars, sleepapnea-test-vars,
+#    sleepapnea-prod-vars containing DATABRICKS_HOST / DATABRICKS_TOKEN (or OIDC federated creds).
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - src/*
+      - notebooks/*
+      - config/*
+      - infra/*
+      - databricks.yml
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  pythonVersion: "3.11"
+
+stages:
+  # ---------------------------------------------------------------------------
+  - stage: BuildAndTest
+    displayName: "Build, Lint & Unit Test"
+    jobs:
+      - job: build_test
+        pool:
+          vmImage: "ubuntu-latest"
+        steps:
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: "$(pythonVersion)"
+
+          - script: |
+              pip install -r requirements.txt
+              pip install -r requirements-dev.txt
+            displayName: "Install dependencies"
+
+          - script: ruff check src/ tests/
+            displayName: "Lint (ruff)"
+
+          - script: black --check src/ tests/
+            displayName: "Format check (black)"
+
+          - script: pytest tests/unit --junitxml=test-results/unit.xml --cov=src --cov-report=xml
+            displayName: "Unit tests (pytest, local SparkSession)"
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: "test-results/*.xml"
+
+          - script: python setup.py bdist_wheel
+            displayName: "Build wheel"
+
+          - publish: dist
+            artifact: wheel
+
+          - publish: .
+            artifact: bundle_source
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployDev
+    displayName: "Deploy to Dev"
+    dependsOn: BuildAndTest
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    variables:
+      - group: sleepapnea-dev-vars
+    jobs:
+      - deployment: deploy_dev
+        environment: "dev"
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: bundle_source
+                - download: current
+                  artifact: wheel
+                - script: pip install databricks-cli databricks-sdk
+                  displayName: "Install Databricks CLI"
+                - script: |
+                    cd $(Pipeline.Workspace)/bundle_source
+                    databricks bundle deploy -t dev
+                    databricks bundle run sleep_apnea_medallion_pipeline -t dev
+                  displayName: "Bundle deploy + smoke-run (dev)"
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployTest
+    displayName: "Deploy to Test"
+    dependsOn: DeployDev
+    condition: succeeded()
+    variables:
+      - group: sleepapnea-test-vars
+    jobs:
+      - deployment: deploy_test
+        environment: "test"   # approval gate configured on this ADO Environment
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: bundle_source
+                - script: pip install databricks-cli databricks-sdk
+                  displayName: "Install Databricks CLI"
+                - script: |
+                    cd $(Pipeline.Workspace)/bundle_source
+                    databricks bundle deploy -t test
+                  displayName: "Bundle deploy (test)"
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+                - script: |
+                    cd $(Pipeline.Workspace)/bundle_source
+                    pytest tests/integration -m test_env
+                  displayName: "Integration tests against Test workspace"
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
+
+  # ---------------------------------------------------------------------------
+  - stage: DeployProd
+    displayName: "Deploy to Production"
+    dependsOn: DeployTest
+    condition: succeeded()
+    variables:
+      - group: sleepapnea-prod-vars
+    jobs:
+      - deployment: deploy_prod
+        environment: "prod"   # approval gate + change-ticket check configured on this ADO Environment
+        pool:
+          vmImage: "ubuntu-latest"
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: current
+                  artifact: bundle_source
+                - script: pip install databricks-cli databricks-sdk
+                  displayName: "Install Databricks CLI"
+                - script: |
+                    cd $(Pipeline.Workspace)/bundle_source
+                    databricks bundle deploy -t prod
+                  displayName: "Bundle deploy (prod)"
+                  env:
+                    DATABRICKS_HOST: $(DATABRICKS_HOST)
+                    DATABRICKS_TOKEN: $(DATABRICKS_TOKEN)
